@@ -1,0 +1,74 @@
+DROP TABLE IF EXISTS action_log;
+DROP TABLE IF EXISTS login_session_log;
+DROP TABLE IF EXISTS users;
+
+--
+CREATE TABLE IF NOT EXISTS users (
+  `userID` int(10) NOT NULL AUTO_INCREMENT,
+  `username` varchar(20) NOT NULL UNIQUE,
+  `password` varchar(60) NOT NULL,
+  `email` varchar(30) NOT NULL UNIQUE,
+  `status` int(1) NOT NULL DEFAULT 1,
+  `creation_date` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP(),
+   PRIMARY KEY (userID)
+);
+
+-- 
+CREATE TABLE IF NOT EXISTS login_session_log (
+	id INT(15) NOT NULL AUTO_INCREMENT,
+	uid INT(10) NULL DEFAULT NULL, 
+	session_id char(40) NOT NULL UNIQUE,
+	ip varchar(20) NOT NULL,
+	session_start DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, 
+	session_expire DATETIME NOT NULL, 
+	PRIMARY KEY (id),
+	FOREIGN KEY (uid) REFERENCES users(userID)
+);
+
+--
+CREATE TABLE IF NOT EXISTS action_log (
+	id int(15) NOT NULL AUTO_INCREMENT,
+	session_id varchar(40) NOT NULL,
+	ip varchar(20) NOT NULL,
+	action varchar(100) NOT NULL,
+	time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+	PRIMARY KEY (id)
+);
+
+-- triggers
+CREATE TRIGGER IF NOT EXISTS `login_session_log_add_new_user` AFTER INSERT ON `users` FOR EACH ROW INSERT INTO `login_session_log`(uid) VALUES (NEW.userID);
+CREATE TRIGGER IF NOT EXISTS `set_expiry_date` BEFORE INSERT ON `login_session_log` FOR EACH ROW SET NEW.session_expire = DATE_ADD(CAST(NEW.session_start AS DATETIME), INTERVAL 1 HOUR);
+CREATE TRIGGER IF NOT EXISTS `set_ip` BEFORE INSERT ON `action_log` FOR EACH ROW SET NEW.ip = (SELECT SUBSTRING_INDEX(host,':',1) FROM information_schema.processlist WHERE ID=connection_id());
+
+-- only one of these two can be added at the same time because mysql is whiny
+DELIMITER @@
+CREATE TRIGGER IF NOT EXISTS `action_log_add` BEFORE INSERT ON `login_session_log` FOR EACH ROW 
+BEGIN
+IF (NEW.uid IS NULL) THEN
+	INSERT INTO action_log(session_id,action) VALUES (NEW.session_id,'session_key_assignment'); 
+ELSEIF ((SELECT COUNT(*) FROM login_session_log WHERE uid=NEW.uid)>1) THEN
+	INSERT INTO action_log(session_id,action) VALUES (NEW.session_id,'login'); 
+ELSE
+	INSERT INTO action_log(session_id,action) VALUES (NEW.session_id,'registration'); 
+END IF;
+END@@
+DELIMITER ;
+
+-- don't use this one
+-- CREATE TRIGGER IF NOT EXISTS `update_login_session_expiry` AFTER INSERT ON `action_log` FOR EACH ROW UPDATE `login_session_log` SET session_expire = CURRENT_TIMESTAMP WHERE uid=(SELECT uid FROM `login_session_log` WHERE session_id=NEW.session_id) AND session_expire > CURRENT_TIMESTAMP AND NEW.action='login';
+
+-- definetly a risky solution but it should be fine for now 
+DELIMITER @@
+CREATE TRIGGER IF NOT EXISTS `set_ip_and_id` BEFORE INSERT ON `login_session_log` FOR EACH ROW 
+BEGIN
+SET NEW.ip = (SELECT SUBSTRING_INDEX(host,':',1) FROM information_schema.processlist WHERE ID=connection_id());
+SET NEW.session_id = (SELECT session_id FROM action_log WHERE ip = NEW.ip ORDER BY id DESC LIMIT 1);
+END@@
+DELIMITER ;
+
+-- INSERT INTO users(username,password,email) VALUES ('test','test','test');
+-- INSERT INTO users(username,password,email) VALUES ('test2','test2','test2');
+-- INSERT INTO login_session_log(uid,session_id) VALUES (1,'v434v2353ev53532532v532');
+-- INSERT INTO login_session_log(uid,session_id) VALUES (2,'v535v353b3263634b634b66');
+-- INSERT INTO login_session_log(uid,session_id) VALUES (1,'v434v2vr3ev5te325325342');
+-- https://dba.stackexchange.com/questions/103851/mysql-trigger-level

@@ -1,0 +1,3 @@
+https://www.sitepoint.com/laravel-project-setup-beginners-guide/
+https://medium.com/@a3rxander/how-to-implement-jwt-authentication-in-laravel-11-26e6d7be5a41
+https://laravel.com/docs/5.0/validation#rule-unique
